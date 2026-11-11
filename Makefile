@@ -5,7 +5,7 @@ export DATABASE_URL
 
 MIGRATIONS   := migrations
 
-.PHONY: up down logs run-order build test tidy sqlc migrate-up migrate-down migrate-version migrate-new
+.PHONY: up down logs run-order build test test-integration tidy sqlc migrate-up migrate-down migrate-version migrate-new
 
 up:
 	$(COMPOSE) up -d --wait
@@ -22,8 +22,13 @@ run-order:
 build:
 	go build -o bin/ ./cmd/...
 
+# Unit tests: fast, no Docker needed.
 test:
 	go test ./...
+
+# Integration tests: start a throwaway Postgres via testcontainers (needs Docker).
+test-integration:
+	go test -tags=integration -count=1 ./...
 
 tidy:
 	go mod tidy

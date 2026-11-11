@@ -48,6 +48,23 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Order
 	return i, err
 }
 
+const getIdempotencyKey = `-- name: GetIdempotencyKey :one
+SELECT key, request_hash, order_id, created_at FROM idempotency_keys
+WHERE key = $1
+`
+
+func (q *Queries) GetIdempotencyKey(ctx context.Context, key string) (IdempotencyKey, error) {
+	row := q.db.QueryRow(ctx, getIdempotencyKey, key)
+	var i IdempotencyKey
+	err := row.Scan(
+		&i.Key,
+		&i.RequestHash,
+		&i.OrderID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getOrder = `-- name: GetOrder :one
 SELECT id, customer_id, amount_cents, currency, status, created_at FROM orders
 WHERE id = $1
@@ -65,6 +82,28 @@ func (q *Queries) GetOrder(ctx context.Context, id uuid.UUID) (Order, error) {
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const insertIdempotencyKey = `-- name: InsertIdempotencyKey :execrows
+INSERT INTO idempotency_keys (key, request_hash, order_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (key) DO NOTHING
+`
+
+type InsertIdempotencyKeyParams struct {
+	Key         string    `json:"key"`
+	RequestHash string    `json:"request_hash"`
+	OrderID     uuid.UUID `json:"order_id"`
+}
+
+// Returns 0 rows affected when the key already exists (or is being
+// inserted by a concurrent transaction that then commits).
+func (q *Queries) InsertIdempotencyKey(ctx context.Context, arg InsertIdempotencyKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertIdempotencyKey, arg.Key, arg.RequestHash, arg.OrderID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertOutboxEvent = `-- name: InsertOutboxEvent :exec

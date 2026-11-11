@@ -2,6 +2,8 @@
 package order
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,6 +27,28 @@ var (
 
 // ErrNotFound is returned when an order does not exist.
 var ErrNotFound = errors.New("order not found")
+
+const maxIdempotencyKeyLen = 255
+
+var (
+	ErrInvalidIdempotencyKey = fmt.Errorf("%w: Idempotency-Key must be at most %d characters", ErrValidation, maxIdempotencyKeyLen)
+	// ErrIdempotencyKeyReuse means the key was already used with a different request body.
+	ErrIdempotencyKeyReuse = errors.New("idempotency key was already used with a different request")
+)
+
+func validateIdempotencyKey(key string) error {
+	if len(key) > maxIdempotencyKeyLen {
+		return ErrInvalidIdempotencyKey
+	}
+	return nil
+}
+
+// requestHash fingerprints the normalized input of an order, so that a
+// retried request ("eur" vs "EUR") matches but a different one does not.
+func requestHash(o Order) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s\x00%d\x00%s", o.CustomerID, o.AmountCents, o.Currency))
+	return hex.EncodeToString(sum[:])
+}
 
 type Order struct {
 	ID          uuid.UUID `json:"id"`

@@ -11,6 +11,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type IdempotencyKey struct {
+	Key         string    `json:"key"`
+	RequestHash string    `json:"request_hash"`
+	OrderID     uuid.UUID `json:"order_id"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type Order struct {
 	ID          uuid.UUID `json:"id"`
 	CustomerID  string    `json:"customer_id"`

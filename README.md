@@ -26,9 +26,21 @@ Prometheus + Grafana + Loki + Promtail → provisioned with Docker Compose
 ## Quick Start
 
 ```bash
-make up          # start Postgres
-make run-order   # run order-service (:8080)
-curl localhost:8080/healthz
+make up            # start Postgres
+make migrate-up    # apply database migrations
+make run-order     # run order-service (:8080)
+
+curl -i -X POST localhost:8080/orders \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: demo-1' \
+  -d '{"customer_id":"c-1","amount_cents":1999,"currency":"EUR"}'
+```
+
+## Testing
+
+```bash
+make test               # unit tests, no Docker needed
+make test-integration   # integration tests against a throwaway Postgres (testcontainers, needs Docker)
 ```
 
 ## Roadmap
@@ -36,7 +48,7 @@ curl localhost:8080/healthz
 | Step | Topic | Status |
 |---|---|---|
 | 0 | Repo skeleton, docker-compose, config, health check | ✅ |
-| 1 | order-service and Transactional Outbox (write side) | 🚧 |
+| 1 | order-service and Transactional Outbox (write side) | ✅ |
 | 2 | outbox-relay → RabbitMQ (publisher confirms, retry) | ⏳ |
 | 3 | Idempotent consumer, inbox table, DLQ | ⏳ |
 | 4 | stream-gateway (WebSocket/SSE) | ⏳ |
@@ -73,7 +85,8 @@ A separate process (the relay) moves the event to the broker afterwards.
 - Keep migrations under `migrations/` as `NNNNNN_name.up.sql` / `NNNNNN_name.down.sql` pairs
 - Every `up` must have a working `down`
 - Makefile targets: `make migrate-up`, `make migrate-down`, `make migrate-new name=<name>`
-- Optionally, embed migrations with `embed` + the `iofs` source and run them on startup
+- Migrations are embedded (`migrations/embed.go`) and applied from Go via `internal/db.MigrateUp`
+  using the `iofs` source and the `pgx5://` driver; integration tests use this to build their schema
 
 **Queries — [sqlc](https://sqlc.dev)**
 
@@ -214,9 +227,9 @@ imports `order`. The service layer (Step 1.6) is the only place that maps betwee
 
 **Acceptance criteria**
 
-- [ ] `NewOrder` returns the correct error for every invalid input (table-driven tests)
-- [ ] `order.created` events carry the order's ID as `AggregateID` and a valid JSON payload
-- [ ] `go test ./internal/...` passes without a database
+- [x] `NewOrder` returns the correct error for every invalid input (table-driven tests)
+- [x] `order.created` events carry the order's ID as `AggregateID` and a valid JSON payload
+- [x] `go test ./internal/...` passes without a database
 
 ### Step 1.5: sqlc queries
 
@@ -277,10 +290,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Order, error) {
 
 **Acceptance criteria**
 
-- [ ] A successful `Create` leaves one row in `orders` and one in `outbox`, with `published_at IS NULL`
-- [ ] If the outbox insert fails, `orders` stays empty
-- [ ] Invalid input never opens a transaction
-- [ ] `Get` returns `ErrNotFound` for an unknown ID
+- [x] A successful `Create` leaves one row in `orders` and one in `outbox`, with `published_at IS NULL`
+- [x] If the outbox insert fails, `orders` stays empty
+- [x] Invalid input never opens a transaction
+- [x] `Get` returns `ErrNotFound` for an unknown ID
 
 ### Step 1.7: HTTP handlers
 
@@ -317,22 +330,83 @@ Errors share one shape: `{"error": "<message>"}`.
 
 **Acceptance criteria**
 
-- [ ] `POST /orders` with a valid body → `201`, a `Location` header, and one row in `orders` and `outbox`
-- [ ] Invalid body (negative amount, bad currency, malformed JSON, unknown field) → `400`, nothing written
-- [ ] `GET /orders/{id}` → `200` for an existing order, `404` for an unknown one, `400` for a non-UUID
-- [ ] `go test ./internal/...` passes without a database
+- [x] `POST /orders` with a valid body → `201`, a `Location` header, and one row in `orders` and `outbox`
+- [x] Invalid body (negative amount, bad currency, malformed JSON, unknown field) → `400`, nothing written
+- [x] `GET /orders/{id}` → `200` for an existing order, `404` for an unknown one, `400` for a non-UUID
+- [x] `go test ./internal/...` passes without a database
 
-### Step 1.8 (optional): Idempotency-Key
+### Step 1.8: Idempotency-Key
 
-- If a client retries the same request with the same `Idempotency-Key` header, no second order is created
+Clients (or proxies) retry on timeouts. Without protection, a retry after a lost response creates a
+second order **and a second event**. With an `Idempotency-Key` header, a retry returns the original order.
+
+```
+migrations/000003_create_idempotency_keys_table.*.sql   # key → request_hash, order_id
+```
+
+```sql
+CREATE TABLE idempotency_keys (
+    key          TEXT PRIMARY KEY,
+    request_hash TEXT        NOT NULL,   -- sha256 of the normalized request
+    order_id     UUID        NOT NULL REFERENCES orders (id),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+**Behavior**
+
+| Request | Response |
+|---|---|
+| New key | `201`, order created |
+| Same key, same body | `201` with the **original** order, `Idempotent-Replayed: true` |
+| Same key, different body | `422 Unprocessable Entity` |
+| Key longer than 255 chars | `400` |
+| No key | Normal create, no protection |
+
+The request hash is computed from the **normalized** input, so `"eur"` and `"EUR"` count as the same request.
+
+**How it works — two paths**
+
+1. **Fast path (sequential retry):** look up the key before opening a transaction; if it exists, return the stored order.
+2. **Slow path (concurrent retries):** both requests pass the lookup and race. The key is inserted
+   in the same transaction as the order and event with `ON CONFLICT (key) DO NOTHING`. The unique index makes
+   the second transaction **wait** for the first; once the first commits, the second sees `0 rows affected`,
+   rolls back its own order + event, and returns the winner's order.
+
+The key lives in the same transaction as the order and event, so a key can never point to an order
+that was rolled back, and a committed order can never be missing its key.
+
+**Not in scope (yet):** keys never expire. A production system would delete keys older than ~24 h.
 
 ### Step 1.9: Integration tests
 
-- Service tests against a real Postgres using `testcontainers-go`, with migrations applied by golang-migrate at test start
+```
+internal/order/integration_test.go   # //go:build integration
+```
 
-### Acceptance Criteria
+- `TestMain` starts `postgres:16-alpine` with `testcontainers-go`, applies migrations with
+  `db.MigrateUp`, and shares one pool across tests; each test truncates the tables first
+- Behind the `integration` build tag, so `make test` stays fast and needs no Docker
 
-- [ ] After `POST /orders`, there is one row in `orders` and one in `outbox`, with `published_at IS NULL`
-- [ ] If the outbox insert fails (forced in a test), `orders` stays empty because the rollback works
-- [ ] Invalid input (negative amount, etc.) → `400`, nothing is written to the database
-- [ ] Integration tests pass with `make test`
+| Test | Proves |
+|---|---|
+| `TestCreate_WritesOrderAndOutboxInOneTransaction` | One order + one `order.created` event, `published_at IS NULL`, payload matches, `Create` == `Get` |
+| `TestCreate_RollsBackOrderWhenOutboxInsertFails` | A trigger makes the outbox insert fail → `orders` stays empty |
+| `TestCreate_InvalidInputWritesNothing` | Validation fails before any write |
+| `TestGet_UnknownIDReturnsNotFound` | `pgx.ErrNoRows` → `ErrNotFound` |
+| `TestCreate_IdempotencyKeyReplaysOriginalOrder` | Retry with same key → same order, still 1 order / 1 event |
+| `TestCreate_IdempotencyKeyReuseWithDifferentBodyFails` | Same key, different body → `ErrIdempotencyKeyReuse` |
+| `TestCreate_ConcurrentRequestsWithSameKeyCreateOneOrder` | 20 simultaneous requests, same key → exactly 1 order, 1 event, 19 replays |
+| `TestHTTP_CreateWithIdempotencyKeyEndToEnd` | Real HTTP server + real DB, replay header and `Location` |
+| `TestMigrations_DownThenUp` | Every `up` migration has a working `down` |
+
+The rollback test uses a real failure inside Postgres rather than a mock, so it proves the
+transaction boundary itself, not just that our code calls `Rollback`.
+
+### Step 1 Acceptance Criteria
+
+- [x] After `POST /orders`, there is one row in `orders` and one in `outbox`, with `published_at IS NULL`
+- [x] If the outbox insert fails, `orders` stays empty because the rollback works
+- [x] Invalid input (negative amount, etc.) → `400`, nothing is written to the database
+- [x] Retrying with the same `Idempotency-Key` never creates a second order or event, even concurrently
+- [x] `make test` and `make test-integration` pass

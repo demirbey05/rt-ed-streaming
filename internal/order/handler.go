@@ -12,12 +12,17 @@ import (
 	"rt-ed-streaming/internal/httpserver"
 )
 
-const maxBodyBytes = 1 << 20 // 1 MB
+const (
+	maxBodyBytes = 1 << 20 // 1 MB
+
+	headerIdempotencyKey = "Idempotency-Key"
+	headerReplayed       = "Idempotent-Replayed"
+)
 
 // OrderService is what the HTTP layer needs from the service.
 // *Service satisfies it; tests use a fake.
 type OrderService interface {
-	Create(ctx context.Context, in CreateInput) (Order, error)
+	Create(ctx context.Context, in CreateInput) (CreateResult, error)
 	Get(ctx context.Context, id uuid.UUID) (Order, error)
 }
 
@@ -52,17 +57,26 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	o, err := h.svc.Create(r.Context(), CreateInput{
-		CustomerID:  req.CustomerID,
-		AmountCents: req.AmountCents,
-		Currency:    req.Currency,
+	res, err := h.svc.Create(r.Context(), CreateInput{
+		CustomerID:     req.CustomerID,
+		AmountCents:    req.AmountCents,
+		Currency:       req.Currency,
+		IdempotencyKey: r.Header.Get(headerIdempotencyKey),
 	})
 	if err != nil {
 		h.writeServiceError(w, r, err)
 		return
 	}
 
-	h.log.Info("order created", "order_id", o.ID, "customer_id", o.CustomerID)
+	o := res.Order
+	if res.Replayed {
+		// Same status and body as the original response, so a retrying
+		// client can't tell the difference except via this header.
+		w.Header().Set(headerReplayed, "true")
+		h.log.Info("order create replayed", "order_id", o.ID)
+	} else {
+		h.log.Info("order created", "order_id", o.ID, "customer_id", o.CustomerID)
+	}
 	w.Header().Set("Location", "/orders/"+o.ID.String())
 	httpserver.WriteJSON(w, http.StatusCreated, o)
 }
@@ -90,6 +104,8 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, r *http.Request, err 
 		httpserver.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrNotFound):
 		httpserver.WriteError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrIdempotencyKeyReuse):
+		httpserver.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 	default:
 		h.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "error", err)
 		httpserver.WriteError(w, http.StatusInternalServerError, "internal server error")

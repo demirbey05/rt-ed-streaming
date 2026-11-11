@@ -5,7 +5,7 @@ export DATABASE_URL
 
 MIGRATIONS   := migrations
 
-.PHONY: up down logs run-order build test tidy migrate-up migrate-down migrate-version migrate-new
+.PHONY: up down logs run-order build test tidy sqlc migrate-up migrate-down migrate-version migrate-new
 
 up:
 	$(COMPOSE) up -d --wait
@@ -27,6 +27,9 @@ test:
 
 tidy:
 	go mod tidy
+
+sqlc:
+	sqlc generate
 
 migrate-up:
 	migrate -path $(MIGRATIONS) -database "$(DATABASE_URL)" up

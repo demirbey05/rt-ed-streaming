@@ -1,0 +1,14 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations # sqlc ignores *.down.sql files
+    queries: internal/order/queries.sql
+    gen:
+      go:
+        package: store
+        out: internal/order/store
+        sql_package: pgx/v5
+        emit_json_tags: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID

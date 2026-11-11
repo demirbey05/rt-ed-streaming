@@ -80,7 +80,27 @@ A separate process (the relay) moves the event to the broker afterwards.
 - `sqlc.yaml` at the repo root, engine `postgresql`, `sql_package: pgx/v5`
 - sqlc reads the schema directly from `migrations/` (it skips `.down.sql` files)
 - Queries live in `internal/order/queries.sql`, generated code goes to `internal/order/store/`
-- Makefile target: `make sqlc`; generated code is committed to the repo
+- `uuid` columns map to `github.com/google/uuid.UUID` instead of the default `pgtype.UUID`
+- Makefile target: `make sqlc`; generated code is committed so the project builds without sqlc installed
+
+```yaml
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: internal/order/queries.sql
+    gen:
+      go:
+        package: store
+        out: internal/order/store
+        sql_package: pgx/v5
+        emit_json_tags: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+```
+
+Verify with `make sqlc && go build ./...`.
 
 ### Step 1.2: `orders` table
 

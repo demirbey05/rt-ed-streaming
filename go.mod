@@ -2,7 +2,10 @@ module rt-ed-streaming
 
 go 1.25.0
 
-require github.com/jackc/pgx/v5 v5.12.0
+require (
+	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.12.0
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

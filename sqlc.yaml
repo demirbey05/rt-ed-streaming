@@ -1,4 +1,19 @@
 version: "2"
+
+# Shared Go type mappings, applied to every package below.
+overrides:
+  go:
+    overrides:
+      - db_type: uuid
+        go_type: github.com/google/uuid.UUID
+      - db_type: timestamptz
+        go_type: time.Time
+      - db_type: timestamptz
+        nullable: true
+        go_type:
+          type: time.Time
+          pointer: true
+
 sql:
   - engine: postgresql
     schema: migrations # sqlc ignores *.down.sql files
@@ -8,14 +23,26 @@ sql:
         package: store
         out: internal/order/store
         sql_package: pgx/v5
+        emit_pointers_for_null_types: true
         emit_json_tags: true
-        overrides:
-          - db_type: uuid
-            go_type: github.com/google/uuid.UUID
-          - db_type: timestamptz
-            go_type: time.Time
-          - db_type: timestamptz
-            nullable: true
-            go_type:
-              type: time.Time
-              pointer: true
+
+  - engine: postgresql
+    schema: migrations
+    queries: internal/relay/queries.sql
+    gen:
+      go:
+        package: store
+        out: internal/relay/store
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+
+  - engine: postgresql
+    schema: migrations
+    queries: internal/notification/queries.sql
+    gen:
+      go:
+        package: store
+        out: internal/notification/store
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        emit_json_tags: true

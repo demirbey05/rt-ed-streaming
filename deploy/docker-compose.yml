@@ -17,5 +17,43 @@ services:
       timeout: 3s
       retries: 10
 
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # management UI (guest / guest)
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- Azure Service Bus emulator (opt-in: `make up-azure`) ---------------
+  # The emulator stores its state in SQL; Azure SQL Edge runs natively on arm64.
+  servicebus-sql:
+    profiles: ["azure"]
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Emulator_Passw0rd!"
+
+  servicebus:
+    profiles: ["azure"]
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    depends_on:
+      - servicebus-sql
+    environment:
+      SQL_SERVER: servicebus-sql
+      MSSQL_SA_PASSWORD: "Emulator_Passw0rd!"
+      ACCEPT_EULA: "Y"
+    volumes:
+      - ./servicebus/config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
+    ports:
+      - "5673:5672" # AMQP (5672 on the host is RabbitMQ)
+      - "5300:5300" # emulator health endpoint
+
 volumes:
   pgdata:
+  rabbitmqdata:

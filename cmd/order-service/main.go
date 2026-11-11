@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"rt-ed-streaming/internal/config"
 	"rt-ed-streaming/internal/db"
@@ -30,49 +28,27 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load(serviceName)
+	cfg, err := config.Load(serviceName, "8080")
+	if err != nil {
+		return err
+	}
+	dbURL, err := config.Required("DATABASE_URL")
 	if err != nil {
 		return err
 	}
 	log := logger.New(cfg.ServiceName, cfg.LogLevel)
 
-	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := db.NewPool(ctx, dbURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
 
-	orders := order.NewHandler(order.NewService(pool), log)
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", httpserver.HealthHandler(log, pool))
-	orders.Register(mux)
+	mux.HandleFunc("GET /healthz", httpserver.HealthHandler(log, map[string]httpserver.Pinger{"postgres": pool}))
+	order.NewHandler(order.NewService(pool), log).Register(mux)
 
-	srv := &http.Server{
-		Addr:              ":" + cfg.HTTPPort,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		log.Info("http server starting", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-		close(errCh)
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-	}
-
-	log.Info("shutting down", "timeout", cfg.ShutdownTimeout.String())
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := httpserver.Run(ctx, log, ":"+cfg.HTTPPort, mux, cfg.ShutdownTimeout); err != nil {
 		return err
 	}
 	log.Info("shutdown complete")

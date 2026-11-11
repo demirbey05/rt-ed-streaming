@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type IdempotencyKey struct {
@@ -16,6 +15,15 @@ type IdempotencyKey struct {
 	RequestHash string    `json:"request_hash"`
 	OrderID     uuid.UUID `json:"order_id"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type Notification struct {
+	ID         uuid.UUID `json:"id"`
+	EventID    uuid.UUID `json:"event_id"`
+	OrderID    uuid.UUID `json:"order_id"`
+	CustomerID string    `json:"customer_id"`
+	Message    string    `json:"message"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type Order struct {
@@ -28,13 +36,19 @@ type Order struct {
 }
 
 type Outbox struct {
-	ID            uuid.UUID   `json:"id"`
-	AggregateType string      `json:"aggregate_type"`
-	AggregateID   uuid.UUID   `json:"aggregate_id"`
-	EventType     string      `json:"event_type"`
-	Payload       []byte      `json:"payload"`
-	CreatedAt     time.Time   `json:"created_at"`
-	PublishedAt   *time.Time  `json:"published_at"`
-	Attempts      int32       `json:"attempts"`
-	LastError     pgtype.Text `json:"last_error"`
+	ID            uuid.UUID  `json:"id"`
+	AggregateType string     `json:"aggregate_type"`
+	AggregateID   uuid.UUID  `json:"aggregate_id"`
+	EventType     string     `json:"event_type"`
+	Payload       []byte     `json:"payload"`
+	CreatedAt     time.Time  `json:"created_at"`
+	PublishedAt   *time.Time `json:"published_at"`
+	Attempts      int32      `json:"attempts"`
+	LastError     *string    `json:"last_error"`
+}
+
+type ProcessedMessage struct {
+	Consumer    string    `json:"consumer"`
+	MessageID   uuid.UUID `json:"message_id"`
+	ProcessedAt time.Time `json:"processed_at"`
 }

@@ -13,6 +13,7 @@ import (
 	"rt-ed-streaming/internal/db"
 	"rt-ed-streaming/internal/httpserver"
 	"rt-ed-streaming/internal/logger"
+	"rt-ed-streaming/internal/order"
 )
 
 const serviceName = "order-service"
@@ -41,8 +42,11 @@ func run() error {
 	}
 	defer pool.Close()
 
+	orders := order.NewHandler(order.NewService(pool), log)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", httpserver.HealthHandler(log, pool))
+	orders.Register(mux)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

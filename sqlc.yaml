@@ -12,3 +12,10 @@ sql:
         overrides:
           - db_type: uuid
             go_type: github.com/google/uuid.UUID
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true

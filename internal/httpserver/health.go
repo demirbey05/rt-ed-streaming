@@ -3,7 +3,6 @@ package httpserver
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -29,8 +28,6 @@ func HealthHandler(log *slog.Logger, db Pinger) http.HandlerFunc {
 			status, code = "degraded", http.StatusServiceUnavailable
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(code)
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "checks": checks})
+		WriteJSON(w, code, map[string]any{"status": status, "checks": checks})
 	}
 }

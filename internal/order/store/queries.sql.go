@@ -7,13 +7,14 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 const createOrder = `-- name: CreateOrder :one
-INSERT INTO orders (id, customer_id, amount_cents, currency, status)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO orders (id, customer_id, amount_cents, currency, status, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, customer_id, amount_cents, currency, status, created_at
 `
 
@@ -23,6 +24,7 @@ type CreateOrderParams struct {
 	AmountCents int64     `json:"amount_cents"`
 	Currency    string    `json:"currency"`
 	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Order, error) {
@@ -32,6 +34,7 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Order
 		arg.AmountCents,
 		arg.Currency,
 		arg.Status,
+		arg.CreatedAt,
 	)
 	var i Order
 	err := row.Scan(
@@ -65,8 +68,8 @@ func (q *Queries) GetOrder(ctx context.Context, id uuid.UUID) (Order, error) {
 }
 
 const insertOutboxEvent = `-- name: InsertOutboxEvent :exec
-INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, payload)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, payload, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertOutboxEventParams struct {
@@ -75,6 +78,7 @@ type InsertOutboxEventParams struct {
 	AggregateID   uuid.UUID `json:"aggregate_id"`
 	EventType     string    `json:"event_type"`
 	Payload       []byte    `json:"payload"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (q *Queries) InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventParams) error {
@@ -84,6 +88,7 @@ func (q *Queries) InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventPa
 		arg.AggregateID,
 		arg.EventType,
 		arg.Payload,
+		arg.CreatedAt,
 	)
 	return err
 }

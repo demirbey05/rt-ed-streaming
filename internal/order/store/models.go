@@ -5,27 +5,29 @@
 package store
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Order struct {
-	ID          uuid.UUID          `json:"id"`
-	CustomerID  string             `json:"customer_id"`
-	AmountCents int64              `json:"amount_cents"`
-	Currency    string             `json:"currency"`
-	Status      string             `json:"status"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	CustomerID  string    `json:"customer_id"`
+	AmountCents int64     `json:"amount_cents"`
+	Currency    string    `json:"currency"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Outbox struct {
-	ID            uuid.UUID          `json:"id"`
-	AggregateType string             `json:"aggregate_type"`
-	AggregateID   uuid.UUID          `json:"aggregate_id"`
-	EventType     string             `json:"event_type"`
-	Payload       []byte             `json:"payload"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	PublishedAt   pgtype.Timestamptz `json:"published_at"`
-	Attempts      int32              `json:"attempts"`
-	LastError     pgtype.Text        `json:"last_error"`
+	ID            uuid.UUID   `json:"id"`
+	AggregateType string      `json:"aggregate_type"`
+	AggregateID   uuid.UUID   `json:"aggregate_id"`
+	EventType     string      `json:"event_type"`
+	Payload       []byte      `json:"payload"`
+	CreatedAt     time.Time   `json:"created_at"`
+	PublishedAt   *time.Time  `json:"published_at"`
+	Attempts      int32       `json:"attempts"`
+	LastError     pgtype.Text `json:"last_error"`
 }
